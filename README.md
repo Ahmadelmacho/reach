@@ -1,79 +1,74 @@
 # reach
 
-**Give Claude Code (or any coding agent) read-only access to the places its built-in web search can't see:** Reddit threads, X posts, Instagram, TikTok, YouTube transcripts, GitHub issues, PubMed, LinkedIn jobs, and pages that block bots or need JavaScript.
+**Let Claude read Reddit, X, Instagram, TikTok and YouTube for you.**
 
-One CLI. Every command prints one JSON object. It reads and never posts.
+Ask Claude "what do people think of X?" and it normally searches Google-style results: articles and ads. With reach it reads the actual Reddit threads, posts, comments and video transcripts where people talk.
 
-## Use it with Claude Code
+## Get it
 
-Out of the box, Claude answers "what do people think of X?" with its own WebSearch tool. That returns articles and SEO pages, and almost never the Reddit threads, comments and videos where people actually talk. reach gives Claude those sources, plus a rule telling it when to use them.
-
-### 1. Install the CLI
-
-You need [uv](https://docs.astral.sh/uv/) (it brings its own Python). For the Reddit, X, Instagram, TikTok and Facebook commands you also need Google Chrome (or Chromium on Linux).
-
-First install uv (skip this if `uv --version` already works):
-
-- macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- Windows (PowerShell): `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
-
-**Close the terminal and open a new one** so it can find `uv`. Then install reach:
-
-```sh
-uv tool install git+https://github.com/Ahmadelmacho/reach
-```
-
-Open one more new terminal and check it works: `reach search "hello world" -n 1`. If the shell says `reach` isn't found, run `uv tool update-shell` and open a new terminal again.
-
-### 2. Teach Claude to use it (one paste)
-
-Open Claude Code and paste this:
+Copy this into Claude Code (terminal, desktop app or VS Code) and send it:
 
 ```text
-Set up the reach CLI for Claude Code (it is already installed; https://github.com/Ahmadelmacho/reach).
-1. Download https://raw.githubusercontent.com/Ahmadelmacho/reach/main/skill/SKILL.md
-   to ~/.claude/skills/reach/SKILL.md. Show me the file before saving it.
-2. Add this section to my user-level ~/.claude/CLAUDE.md (create the file if missing):
-
-   # People & social research: use reach first
-   For any question about what people say (experiences, reviews, complaints, recommendations,
-   "has anyone...", sentiment) and any Reddit, X, YouTube, TikTok, Instagram, GitHub or PubMed lookup:
-   load the `reach` skill and use the `reach` CLI before WebSearch, one call at a time.
-   WebSearch is for official or factual pages. For Reddit, X, YouTube, TikTok, Instagram,
-   LinkedIn or Facebook links, use `reach read <url>` instead of WebFetch.
-
-3. Optional reminder hook: in ~/.claude/settings.json add this PreToolUse hook, merged with any
-   hooks I already have (don't overwrite them):
+Install reach for me from https://github.com/Ahmadelmacho/reach and set it up so you use it:
+1. If the `uv` command is missing, install it with uv's official installer for my system.
+2. Run: uv tool install git+https://github.com/Ahmadelmacho/reach
+   If `reach` isn't found afterwards, use the full path (~/.local/bin/reach) and run `uv tool update-shell`.
+3. Save https://raw.githubusercontent.com/Ahmadelmacho/reach/main/skill/SKILL.md
+   as ~/.claude/skills/reach/SKILL.md
+4. Add this to ~/.claude/CLAUDE.md (create it if missing):
+   # Use reach for people research
+   For questions about what people say (reviews, experiences, complaints, recommendations, trends)
+   and for Reddit, X, YouTube, TikTok, Instagram, GitHub or PubMed: use the `reach` skill before
+   WebSearch, one call at a time. For links on those sites, use `reach read <url>` instead of WebFetch.
+5. Add this PreToolUse hook to ~/.claude/settings.json, keeping any hooks I already have:
    {"matcher": "WebSearch|WebFetch",
     "hooks": [{"type": "command", "command": "reach hook", "timeout": 5, "onFailure": "continue"}]}
-Then run `reach search "test" -n 1` to confirm it works.
+6. Test it with: reach search "test" -n 1
+Then tell me in one line what you did, and to restart Claude Code.
 ```
 
-Claude asks before each step. The first time it runs a `reach` command, pick "Yes, and don't ask again" so later research doesn't stop for permission prompts. Restart Claude Code afterwards so it loads the skill and the hook.
+Click "Yes" when Claude asks to run things. Restart Claude Code when it's done. That's it.
 
-What each piece does:
-- **The skill** (`skill/SKILL.md`) lists every command and the safety rules. Claude reads it when a task needs reach.
-- **The CLAUDE.md rule** makes reach the default for people-research, so Claude stops going to WebSearch first.
-- **The hook** (`reach hook`) adds a one-line reminder to Claude's context whenever it is about to use WebSearch, or WebFetch on a social site. It never blocks anything and stays silent for other tools. Skip it if the CLAUDE.md rule is enough for you.
+You need Google Chrome installed for Reddit, X, Instagram, TikTok and Facebook.
 
-### 3. Ask normally
+## How it works
 
-- "What do people on Reddit say about the Framework 13 laptop after a year of use?"
-- "Find TikToks about home espresso setups and tell me which hooks get the most views."
-- "Get the transcript of this YouTube video and summarise the main points: <link>"
-- "What are the open complaints in the issues of github.com/owner/repo?"
-- "Find recent studies on intermittent fasting and sleep on PubMed."
+- **reach** is a small program on your computer. It opens pages in a hidden Chrome window and hands Claude the text.
+- **The skill** teaches Claude the commands. **The rule** tells Claude to use reach for "what are people saying" questions instead of normal web search.
+- It only reads. It never posts, likes, follows or messages anyone.
+
+## Log in (optional, recommended)
+
+Reddit, X, Instagram and Facebook show little or nothing to logged-out visitors. Logging in once lets reach see full threads, comments and search results.
+
+Ask Claude: **"Log reach into Reddit"** (or X, Instagram, Facebook). A Chrome window opens. Sign in, close the window. Done. The login stays saved for next time.
+
+- **Use a spare account**, never your personal or work one. Automated reading breaks these sites' rules, so the account could get banned.
+- The login lives in reach's own browser profile. Your normal Chrome is never touched, and Claude never sees your password.
+
+YouTube, TikTok, GitHub and PubMed need no login.
+
+## Try it
+
+- "What do people on Reddit say about the Framework laptop after a year?"
+- "Find popular TikToks about home espresso and tell me which hooks get the most views."
+- "Get the transcript of this YouTube video and summarise it: <link>"
 - "What is X saying about the new iPhone battery?"
+- "Find recent PubMed studies on sleep and memory."
 
-### 4. Log in (only for the sites you need)
+---
 
-YouTube, TikTok, GitHub, PubMed, LinkedIn jobs and web search need no login. Reddit, X, Instagram and Facebook work best (or only) logged in:
+Everything below is for developers.
+
+## Manual install
 
 ```sh
+uv tool install git+https://github.com/Ahmadelmacho/reach   # needs uv: https://docs.astral.sh/uv/
+reach search "hello world" -n 1
 reach login reddit     # also: x, instagram, facebook, linkedin, tiktok, threads
 ```
 
-A normal Chrome window opens on a separate reach profile (`~/.reach/profile`). Sign in and close the window. Your everyday Chrome is never touched. **Use a secondary account**, never your personal or a work account (see Security).
+Then copy `skill/SKILL.md` to `~/.claude/skills/reach/SKILL.md`. The optional `reach hook` command is a Claude Code PreToolUse hook: when Claude is about to use WebSearch, or WebFetch on a social site, it adds a one-line reminder to use reach. It never blocks anything. Works with other agents too (Codex, Cursor, Aider): anything that can run a shell command can call `reach` and read the JSON.
 
 ## Commands
 
@@ -99,7 +94,6 @@ Settings, all optional:
 - `REACH_HOME`: where the login profile lives (default `~/.reach`).
 - `GITHUB_TOKEN`: raises the GitHub API rate limit.
 
-Works with other agents too (Codex, Cursor, Aider): anything that can run a shell command can call `reach` and read the JSON.
 
 ## Security
 
