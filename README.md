@@ -37,11 +37,21 @@ You need Google Chrome installed for Reddit, X, Instagram, TikTok and Facebook.
 - **The skill** teaches Claude the commands. **The rule** tells Claude to use reach for "what are people saying" questions instead of normal web search.
 - It only reads. It never posts, likes, follows or messages anyone.
 
-## Log in (optional, recommended)
+## Log in (optional)
 
 Reddit, X, Instagram and Facebook show little or nothing to logged-out visitors. Logging in once lets reach see full threads, comments and search results.
 
-**Use a spare account**, never your personal or work one. Automated reading breaks these sites' rules, so the account could get banned.
+**Logging in puts that account at risk.** Automated reading breaks these sites' rules, and people using tools like this report bans: an X account banned on its very first search, X accounts gone within 3 days, Instagram and LinkedIn accounts locked quickly. So:
+
+- **Only ever log in with a throwaway account** you'd be fine losing. Never your personal, work or brand account.
+- Don't connect it to your real accounts: use a different email, and don't add it to Meta's Accounts Center.
+- Ask for small amounts (a few searches, not hundreds) and don't run several at once.
+
+| Site | Ban risk when logged in |
+|---|---|
+| YouTube, TikTok, GitHub, PubMed, web search | No login needed, no account at risk |
+| Reddit | Lowest. We found no ban reports for reading at normal volume |
+| X, Instagram, Facebook, LinkedIn | High. Expect the account to be banned or locked at some point |
 
 **Step 1. Open a terminal**
 - Mac: press `Cmd + Space`, type **Terminal**, press Enter.
@@ -62,12 +72,12 @@ Reddit, X, Instagram and Facebook show little or nothing to logged-out visitors.
 
 **Step 3. Sign in, then close the window**
 
-A Chrome window opens on that site's login page. Sign in with your spare account, then close the window. The login is saved, so you only do this once per site. Repeat Step 2 for each site you want.
+A Chrome window opens on that site's login page. Sign in with your throwaway account, then close the window. The login is saved, so you only do this once per site. Repeat Step 2 for each site you want.
 
 Prefer not to touch a terminal? Ask Claude: **"Log reach into Reddit"**. It opens the same window for you.
 
 - The login lives in reach's own browser profile. Your normal Chrome is never touched, and Claude never sees your password.
-- YouTube, TikTok, GitHub and PubMed work without logging in.
+- To log out of a site, run `reach login <site>` and sign out in the window. To remove every login, delete the folder `~/.reach/profile`.
 - Logged in on a site already and it says "needs a login" again? The site logged you out. Run the same command again.
 
 ## Try it
