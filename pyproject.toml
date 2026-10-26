@@ -1,9 +1,9 @@
 [project]
 name = "reach-cli"   # not published to PyPI: install from the git URL, never `uv tool install reach-cli`
-version = "0.1.0"
+version = "0.2.0"
 description = "Read-only internet access for AI agents: one CLI, JSON out."
 requires-python = ">=3.10"
-# Exact pins, all at least two weeks old when chosen. Bump on purpose, never automatically.
+# Exact pins for direct dependencies (their own dependencies float). Bump on purpose, never automatically.
 dependencies = [
     "requests==2.34.2",
     "yt-dlp==2026.8.19",

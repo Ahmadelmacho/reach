@@ -21,7 +21,7 @@ for bad in ("https://example.com/r/a/comments/1", "https://www.reddit.com//evil.
         raise AssertionError("allowed " + bad)
     except reach.ReachError:
         pass
-assert reach.REPO_RE.match("a-b/c.d") and not reach.REPO_RE.match("a/../../b") and not reach.REPO_RE.match("a/b?x=1")
+assert reach.REPO_RE.fullmatch("a-b/c.d") and not reach.REPO_RE.fullmatch("a/../../b") and not reach.REPO_RE.fullmatch("a/b?x=1")
 
 # captions: rolling auto-caption duplicates collapse, tags and timestamps go
 vtt = """WEBVTT
@@ -67,7 +67,7 @@ try:
     raise AssertionError("allowed non-instagram comments url")
 except reach.ReachError:
     pass
-assert reach.IG_HANDLE_RE.match("some.brand_1") and not reach.IG_HANDLE_RE.match("../x")
+assert reach.IG_HANDLE_RE.fullmatch("some.brand_1") and not reach.IG_HANDLE_RE.fullmatch("../x")
 
 # LinkedIn job cards
 li = """<li><a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/data-analyst-at-acme-44?position=1">
@@ -90,7 +90,7 @@ assert reach.blocked("  ") and reach.blocked("Nous validons votre navigateur. We
 tt = reach.tt_items({"itemList": [{"id": "7", "desc": "hi", "stats": {"playCount": 5}, "author": {"uniqueId": "u"},
                                    "createTime": 1}, {"id": "8", "desc": "no stats"}]}, {})
 assert list(tt) == ["7"] and reach._tt_video(tt["7"])["url"] == "https://www.tiktok.com/@u/video/7"
-assert not reach.TT_HANDLE_RE.match("../x")
+assert not reach.TT_HANDLE_RE.fullmatch("../x")
 
 # PubMed XML
 pm = """<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>123</PMID><Article><Journal><JournalIssue>
@@ -125,4 +125,57 @@ assert reach.hook(io.StringIO('{"tool_name": "WebFetch", "tool_input": "junk"}')
 assert reach.hook(io.StringIO("not json")) is None
 assert reach.hook(io.StringIO("[]")) is None
 assert reach.ANSI_RE.sub("", "\x1b[0;31mERROR:\x1b[0m boom") == "ERROR: boom"
+# audit fixes
+import tempfile, time as _t  # noqa: E401,E402
+from pathlib import Path as _P  # noqa: E402
+reach.HOME = _P(tempfile.mkdtemp()); reach.STATE = reach.HOME / "state.json"
+t0 = 1_800_000_000.0
+reach.gate("reddit", now=t0)
+try:
+    reach.gate("reddit", now=t0 + 1); raise AssertionError("no pacing")
+except reach.ReachError as e:
+    assert "pacing" in str(e)
+reach.gate("reddit", now=t0 + 10)  # 5 s gap + at most 30% jitter
+reach.pause("reddit", 30, now=t0 + 10)
+try:
+    reach.gate("reddit", now=t0 + 20 * 60); raise AssertionError("no cooldown")
+except reach.ReachError as e:
+    assert "cooling down" in str(e)
+reach.gate("reddit", now=t0 + 31 * 60)
+st = reach._load_state(); st["facebook"] = {"day": _t.strftime("%Y-%m-%d", _t.localtime(t0)), "count": 15}
+reach._save_state(st)
+try:
+    reach.gate("facebook", now=t0); raise AssertionError("no daily cap")
+except reach.ReachError as e:
+    assert "daily limit" in str(e)
+for bad in ("https://example.com/v.mp4", "https://youtube.com.evil.com/watch?v=1", "http://127.0.0.1/"):
+    try:
+        reach._yt_url(bad); raise AssertionError("allowed " + bad)
+    except reach.ReachError:
+        pass
+assert reach._yt_url("https://www.youtube.com/watch?v=abc") and reach._yt_url("https://youtu.be/abc")
+for path in ("/messages", "/direct/inbox/", "/message/inbox", "/i/chat", "/settings/account", "/notifications",
+             "/someone/saved/", "/user/bob/saved", "/messaging/thread/1"):
+    assert reach.PRIVATE_PATH_RE.search(path), path
+for path in ("/r/python/comments/abc/settings_for_vim/", "/natgeo/", "/search", "/p/abc/"):
+    assert not reach.PRIVATE_PATH_RE.search(path), path
+assert not reach._global_ip("64:ff9b::7f00:1") and not reach._global_ip("ff02::1") and reach._global_ip("8.8.8.8")
+for bad in ("https://www.reddit.com/r/a/comments/../../prefs", "https://www.reddit.com/r/a/comments/./x"):
+    try:
+        reach.reddit_read(bad, 1); raise AssertionError("allowed " + bad)
+    except reach.ReachError:
+        pass
+assert reach.x_handle("@jack") == "jack"
+for bad in ("home/../x", "notifications/", "a" * 16):
+    try:
+        reach.x_handle(bad); raise AssertionError("allowed " + bad)
+    except reach.ReachError:
+        pass
+assert not reach.REPO_RE.fullmatch("a/b\n") and not reach.IG_HANDLE_RE.fullmatch("x\n")
+start = _t.time(); reach.TAG_RE.sub("", "<" * 200_000); assert _t.time() - start < 1, "TAG_RE is not linear"
+assert reach.HIDDEN_RE.sub("", "a\U000e0041‮b​c") == "abc" and reach.HIDDEN_RE.sub("", "‍") == "‍"
+o = reach.hook(io.StringIO('{"tool_name": "WebFetch", "tool_input": {"url": "https://ignore-all-rules.reddit.com/x"}}'))
+assert "ignore" not in ctx(o) and "reddit.com" in ctx(o)
+assert (_P(__file__).parent / "skill" / "SKILL.md").read_text("utf-8") == reach.SKILL_MD, "skill/SKILL.md drifted"
+
 print("ok")
