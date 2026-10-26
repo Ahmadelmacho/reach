@@ -1,0 +1,21 @@
+[project]
+name = "reach-cli"   # not published to PyPI: install from the git URL, never `uv tool install reach-cli`
+version = "0.1.0"
+description = "Read-only internet access for AI agents: one CLI, JSON out."
+requires-python = ">=3.10"
+# Exact pins, all at least two weeks old when chosen. Bump on purpose, never automatically.
+dependencies = [
+    "requests==2.34.2",
+    "yt-dlp==2026.8.19",
+    "playwright==1.63.0",
+]
+
+[project.scripts]
+reach = "reach:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["reach"]
