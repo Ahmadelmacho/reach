@@ -41,12 +41,34 @@ You need Google Chrome installed for Reddit, X, Instagram, TikTok and Facebook.
 
 Reddit, X, Instagram and Facebook show little or nothing to logged-out visitors. Logging in once lets reach see full threads, comments and search results.
 
-Ask Claude: **"Log reach into Reddit"** (or X, Instagram, Facebook). A Chrome window opens. Sign in, close the window. Done. The login stays saved for next time.
+**Use a spare account**, never your personal or work one. Automated reading breaks these sites' rules, so the account could get banned.
 
-- **Use a spare account**, never your personal or work one. Automated reading breaks these sites' rules, so the account could get banned.
+**Step 1. Open a terminal**
+- Mac: press `Cmd + Space`, type **Terminal**, press Enter.
+- Windows: click Start, type **PowerShell**, press Enter.
+- Or stay in Claude Code: type `!` followed by the command (for example `! reach login reddit`).
+
+**Step 2. Copy the line for the site you want, paste it, press Enter**
+
+| Site | Command |
+|---|---|
+| Reddit | `reach login reddit` |
+| X (Twitter) | `reach login x` |
+| Instagram | `reach login instagram` |
+| Facebook | `reach login facebook` |
+| LinkedIn | `reach login linkedin` |
+| TikTok | `reach login tiktok` |
+| Threads | `reach login threads` |
+
+**Step 3. Sign in, then close the window**
+
+A Chrome window opens on that site's login page. Sign in with your spare account, then close the window. The login is saved, so you only do this once per site. Repeat Step 2 for each site you want.
+
+Prefer not to touch a terminal? Ask Claude: **"Log reach into Reddit"**. It opens the same window for you.
+
 - The login lives in reach's own browser profile. Your normal Chrome is never touched, and Claude never sees your password.
-
-YouTube, TikTok, GitHub and PubMed need no login.
+- YouTube, TikTok, GitHub and PubMed work without logging in.
+- Logged in on a site already and it says "needs a login" again? The site logged you out. Run the same command again.
 
 ## Try it
 
