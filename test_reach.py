@@ -44,12 +44,26 @@ ddg = """
 <a class="result__snippet" href="x">Snip &amp; more</a></div>
 """
 assert reach.parse_ddg(ddg, 5) == [{"title": "Ex A", "url": "https://example.com/a", "snippet": "Snip & more"}]
+assert reach.DDG_BOT_RE.search('<div class="anomaly-modal__title">Unfortunately, bots use DuckDuckGo too.</div>')
+assert not reach.DDG_BOT_RE.search('<input name="q" value="anomaly detection">No results found')
 
 # reddit comment tree flattening
 tree = [{"kind": "t1", "data": {"author": "a", "score": 3, "body": "top", "replies": {"data": {"children": [
     {"kind": "t1", "data": {"author": "b", "score": 1, "body": "child", "replies": ""}},
     {"kind": "more", "data": {}}]}}}}]
 assert [(c["depth"], c["text"]) for c in reach.flatten_comments(tree)] == [(0, "top"), (1, "child")]
+
+# reddit search page (trimmed from the real markup): fields come from the tracking JSON and counter row
+unit = """<div class="x" data-testid="search-post-unit"><search-telemetry-tracker data-faceplate-tracking-context="{&quot;post&quot;:{&quot;id&quot;:&quot;t3_abc&quot;,&quot;title&quot;:&quot;Tips &amp; \\&quot;tricks\\&quot;&quot;},&quot;profile&quot;:{&quot;name&quot;:&quot;u1&quot;},&quot;subreddit&quot;:{&quot;name&quot;:&quot;sub&quot;}}"><h2>
+<a data-testid="post-title" href="/r/sub/comments/abc/tips_tricks/" class="a" aria-label="Tips"></a></h2></search-telemetry-tracker>
+<faceplate-timeago format="narrow" ts="2026-10-20T05:29:40.423000+0000"></faceplate-timeago>
+<div data-testid="search-counter-row"><span><faceplate-number number="-2" pretty></faceplate-number> votes</span>
+<span><faceplate-number number="11" pretty></faceplate-number> comments</span></div></div>"""
+broken = '<div data-testid="search-post-unit"><a data-testid="post-title" href="/r/sub/comments/zz/x/"></a></div>'
+rs = reach.parse_reddit_search(unit + broken + unit, 5)
+assert rs[0] == {"title": 'Tips & "tricks"', "subreddit": "sub", "author": "u1", "score": -2, "comments": 11,
+                 "created_utc": 1792474180, "url": "https://www.reddit.com/r/sub/comments/abc/tips_tricks/"}, rs
+assert len(rs) == 2 and len(reach.parse_reddit_search(unit * 3, 1)) == 1 and reach.parse_reddit_search("<html>", 5) == []
 
 # Instagram: post objects found at any depth, deduped by shortcode
 payload = {"data": {"x": {"edges": [{"node": {"code": "AB1", "taken_at": 1, "user": {"username": "u"},

@@ -8,6 +8,7 @@ types or posts: it only navigates and reads.
 from __future__ import annotations
 
 import argparse
+import calendar
 import html
 import ipaddress
 import json
@@ -376,16 +377,26 @@ def parse_ddg(page_html: str, n: int) -> list:
     return out
 
 
+DDG_BOT_RE = re.compile(r"anomaly-modal|bots use DuckDuckGo", re.I)  # its challenge page, served with status 202
+
+
 def search(query: str, n: int) -> dict:
     gate("duckduckgo")
-    r = requests.post("https://html.duckduckgo.com/html/", data={"q": query},
-                      headers={"User-Agent": ua()}, timeout=TIMEOUT)
-    results = parse_ddg(r.text, n)
-    if not results:
-        raise ReachError(f"no search results (DuckDuckGo status {r.status_code})",
-                         hint="DuckDuckGo may be rate-limiting. Do not retry; use the agent's own web search.",
-                         cooldown_min=30 if r.status_code in (202, 403, 429) else 0)
-    return {"query": query, "results": results}
+    # The throwaway Chrome that `reach read` uses: DuckDuckGo answers plain HTTP clients from some networks
+    # with a bot check (202). One attempt only; a bot check here still means stop.
+    with browser_page() as page:
+        resp = _goto(page, f"https://html.duckduckgo.com/html/?q={quote(query)}", settle_ms=300)
+        page_html = page.content()
+    status = resp.status if resp else 0
+    results = parse_ddg(page_html, n)
+    if results:
+        return {"query": query, "results": results}
+    if status in (202, 403, 429) or DDG_BOT_RE.search(page_html):
+        raise ReachError(f"DuckDuckGo showed a bot check (status {status})",
+                         hint="DuckDuckGo is refusing this network for now. Do not retry; use the agent's own "
+                              "web search. reach pauses DuckDuckGo for 30 minutes.", cooldown_min=30)
+    raise ReachError("no search results", hint="Nothing matched, or DuckDuckGo changed its page. Try other words "
+                     "once, then use the agent's own web search.")
 
 
 # ── YouTube (yt-dlp) ──
@@ -514,21 +525,26 @@ def gh_issue(ref: str, limit: int) -> dict:
                          for c in comments]}
 
 
-# ── Reddit (JSON fetched inside the reach browser, so your login applies) ──
+# ── Reddit (fetched inside the reach browser, so your login applies) ──
 
-def reddit_json(path: str):
+def reddit_get(path: str, accept: str = "application/json") -> str:
     with browser_page(SITES["reddit"][1]) as page:
         _goto(page, "https://www.reddit.com/", settle_ms=500)
         status, body = page.evaluate(
-            "async p => { const r = await fetch(p, {headers: {accept: 'application/json'}});"
-            " return [r.status, await r.text()]; }", path)
+            "async ([p, a]) => { const r = await fetch(p, {headers: {accept: a}});"
+            " return [r.status, await r.text()]; }", [path, accept])
     if status == 429:
         raise ReachError("Reddit is rate-limiting", hint="Do not retry. Reddit is paused for 30 minutes.",
                          cooldown_min=30)
     if status != 200:
-        raise ReachError(f"Reddit returned {status}", hint="If this keeps happening, ask the user to run "
-                         "`reach login reddit` and sign in. Do not retry in a loop.", cooldown_min=60)
-    return json.loads(body)
+        raise ReachError(f"Reddit returned {status}", hint="Do not retry; Reddit is paused for an hour. If "
+                         "reddit-read and reddit-sub also fail after that, the login may have lapsed: offer "
+                         "the user `reach login reddit`.", cooldown_min=60)
+    return body
+
+
+def reddit_json(path: str):
+    return json.loads(reddit_get(path))
 
 
 def _post(d: dict) -> dict:
@@ -550,10 +566,43 @@ def flatten_comments(children: list, depth: int = 0, out: list | None = None) ->
     return out
 
 
+def parse_reddit_search(page_html: str, n: int) -> list:
+    """Posts from Reddit's search page: title, subreddit, author, date and counts, no body text."""
+    out = []
+    for unit in page_html.split('data-testid="search-post-unit"')[1:]:
+        ctx = re.search(r'data-faceplate-tracking-context="([^"]*)"', unit)
+        tag = re.search(r'<a\b[^>]*data-testid="post-title"[^>]*>', unit)
+        href = re.search(r'\bhref="(/r/[^"/]+/comments/[^"]+)"', tag.group(0)) if tag else None
+        if not (ctx and href):
+            continue
+        try:
+            info = json.loads(html.unescape(ctx.group(1)))
+        except ValueError:
+            continue
+        counts: dict = {}
+        for num, word in re.findall(r'number="(-?\d+)"[^>]*>\s*</faceplate-number>\s*(vote|comment)', unit):
+            counts.setdefault(word, int(num))
+        ts = re.search(r'<faceplate-timeago\b[^>]*\bts="(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)', unit)
+        out.append({"title": (info.get("post") or {}).get("title"),
+                    "subreddit": (info.get("subreddit") or {}).get("name"),
+                    "author": (info.get("profile") or {}).get("name"),
+                    "score": counts.get("vote"), "comments": counts.get("comment"),
+                    # ponytail: Reddit sends these timestamps in UTC (+0000); the offset is not parsed
+                    "created_utc": calendar.timegm(time.strptime(ts.group(1), "%Y-%m-%dT%H:%M:%S")) if ts else None,
+                    "url": "https://www.reddit.com" + html.unescape(href.group(1))})
+        if len(out) >= n:
+            break
+    return out
+
+
 def reddit_search(query: str, n: int, sub: str = "") -> dict:
-    base = f"/r/{quote(sub, safe='')}/search.json?restrict_sr=1&" if sub else "/search.json?"
-    data = reddit_json(f"{base}q={quote(query)}&limit={n}&sort=relevance&raw_json=1")
-    return {"query": query, "results": [_post(c["data"]) for c in data["data"]["children"]]}
+    # Reddit's search.json answers 403 since late Oct 2026; its search page still works (first page only).
+    base = f"/r/{quote(sub, safe='')}/search/?restrict_sr=1&" if sub else "/search/?"
+    results = parse_reddit_search(reddit_get(f"{base}q={quote(query)}", accept="text/html"), n)
+    if not results:
+        raise ReachError("no Reddit posts found", hint="Nothing matched, or Reddit changed its search page. Try "
+                         "other words once, then use reddit-sub or `reach search` instead.")
+    return {"query": query, "results": results}
 
 
 def reddit_sub(name: str, n: int, sort: str) -> dict:
@@ -975,7 +1024,7 @@ Act on `hint` when a call fails. Add `--max-chars N` before the command to cap l
 | Web search | `reach search "<q>" -n 10` |
 | YouTube | `reach yt-search "<q>"` · `reach yt-info <url>` · `reach yt-transcript <url> --lang en` |
 | GitHub | `reach gh-search "<q>"` · `reach gh-readme owner/name` · `reach gh-issue owner/name#123` |
-| Reddit | `reach reddit-search "<q>" --sub name` · `reach reddit-sub name --sort top` · `reach reddit-read <thread url>` |
+| Reddit | `reach reddit-search "<q>" --sub name` (titles + counts, first page only) · `reach reddit-sub name --sort top` · `reach reddit-read <thread url>` |
 | X | `reach x-search "<q>"` · `reach x-user <handle>` |
 | Instagram | `reach ig-search "<q>"` · `reach ig-user <handle>` · `reach ig-comments <post url> -n 30` (best effort) |
 | TikTok | `reach tt-search "<q>"` · `reach tt-user <handle>` (views/likes/comments/shares/saves/caption) |
@@ -1064,7 +1113,7 @@ def main(argv: list | None = None) -> int:
     add("gh-search", "search GitHub repos", pos("query", "search terms"), num())
     add("gh-readme", "repo info + README", pos("repo", "owner/name"))
     add("gh-issue", "issue or PR with comments", pos("ref", "owner/name#123"))
-    add("reddit-search", "search Reddit", pos("query", "search terms"), num(25),
+    add("reddit-search", "search Reddit (first page of results, no post text)", pos("query", "search terms"), num(25),
         (("--sub",), {"default": "", "help": "limit to one subreddit"}))
     add("reddit-sub", "browse a subreddit", pos("name", "subreddit without r/"), num(25),
         (("--sort",), {"default": "hot", "choices": ["hot", "new", "top", "rising"]}))

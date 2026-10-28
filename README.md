@@ -15,7 +15,7 @@ If any step fails, stop and tell me the error. Run only the commands below.
    ~/.local/bin/uv (or %USERPROFILE%\.local\bin\uv.exe on Windows) until I restart:
    macOS/Linux:  curl -LsSf https://astral.sh/uv/install.sh | sh
    Windows:      powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-2. Run: uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.0
+2. Run: uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.1
    If `reach` isn't found afterwards, use its full path in ~/.local/bin and run `uv tool update-shell`.
 3. Run: reach install-skill
 4. Add this to ~/.claude/CLAUDE.md (create it if missing):
@@ -27,13 +27,13 @@ If any step fails, stop and tell me the error. Run only the commands below.
    under hooks.PreToolUse, keeping everything else, check the file is still valid JSON, and show me the diff:
    {"matcher": "WebSearch|WebFetch",
     "hooks": [{"type": "command", "command": "reach hook", "timeout": 5, "onFailure": "continue"}]}
-6. Test it with: reach search "test" -n 1
+6. Test it with: reach browse https://github.com/Ahmadelmacho/reach
 Then tell me in one line what you did, and to restart Claude Code.
 ```
 
 Click "Yes" when Claude asks to run things. Restart Claude Code when it's done. That's it.
 
-You need Google Chrome installed for Reddit, X, Instagram, TikTok and Facebook.
+You need Google Chrome installed for web search, Reddit, X, Instagram, TikTok and Facebook.
 
 ## How it works
 
@@ -112,9 +112,9 @@ Everything below is for developers.
 ## Manual install
 
 ```sh
-uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.0   # needs uv: https://docs.astral.sh/uv/
+uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.1   # needs uv: https://docs.astral.sh/uv/
 reach install-skill        # writes ~/.claude/skills/reach/SKILL.md
-reach search "hello world" -n 1
+reach browse https://github.com/Ahmadelmacho/reach
 ```
 
 Install only from this git URL. Never `pip install reach` or `reach-cli`: anything on PyPI under those names is not this project.
@@ -129,7 +129,7 @@ The optional `reach hook` command is a Claude Code PreToolUse hook: when Claude 
 | Web search (DuckDuckGo) | `reach search "<q>" -n 10` |
 | YouTube | `reach yt-search "<q>"` · `reach yt-info <url>` · `reach yt-transcript <url> --lang en` |
 | GitHub | `reach gh-search "<q>"` · `reach gh-readme owner/name` · `reach gh-issue owner/name#123` |
-| Reddit | `reach reddit-search "<q>" --sub name` · `reach reddit-sub name --sort top` · `reach reddit-read <thread url>` |
+| Reddit | `reach reddit-search "<q>" --sub name` (titles + counts, first page only) · `reach reddit-sub name --sort top` · `reach reddit-read <thread url>` |
 | X | `reach x-search "<q>"` · `reach x-user <handle>` |
 | Instagram | `reach ig-search "<q>"` · `reach ig-user <handle>` · `reach ig-comments <post url> -n 30` |
 | TikTok | `reach tt-search "<q>"` · `reach tt-user <handle>` |
@@ -138,7 +138,7 @@ The optional `reach hook` command is a Claude Code PreToolUse hook: when Claude 
 | LinkedIn jobs (public postings, never logged in) | `reach li-jobs "<q>" --location Berlin` · `reach li-job <jobs/view url>` |
 | Rendered page | `reach browse <url>` |
 
-Output is `{"ok": true, "untrusted_content": true, "result": ...}` or `{"ok": false, "untrusted_content": true, "error": ..., "hint": ...}`. Put `--max-chars N` before the command to cap long text (default 40000). Commands that don't open a browser (search, YouTube, GitHub, PubMed, LinkedIn jobs, most `read` calls) work without Chrome.
+Output is `{"ok": true, "untrusted_content": true, "result": ...}` or `{"ok": false, "untrusted_content": true, "error": ..., "hint": ...}`. Put `--max-chars N` before the command to cap long text (default 40000). Commands that don't open a browser (YouTube, GitHub, PubMed, LinkedIn jobs, most `read` calls) work without Chrome. Web search runs in the same cookie-free Chrome as `reach read`, because DuckDuckGo answers plain HTTP clients from some networks with a bot check.
 
 Settings, all optional:
 - `REACH_CHROME`: full path to Chrome or Chromium, if reach can't find it.

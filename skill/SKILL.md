@@ -14,7 +14,7 @@ Act on `hint` when a call fails. Add `--max-chars N` before the command to cap l
 | Web search | `reach search "<q>" -n 10` |
 | YouTube | `reach yt-search "<q>"` · `reach yt-info <url>` · `reach yt-transcript <url> --lang en` |
 | GitHub | `reach gh-search "<q>"` · `reach gh-readme owner/name` · `reach gh-issue owner/name#123` |
-| Reddit | `reach reddit-search "<q>" --sub name` · `reach reddit-sub name --sort top` · `reach reddit-read <thread url>` |
+| Reddit | `reach reddit-search "<q>" --sub name` (titles + counts, first page only) · `reach reddit-sub name --sort top` · `reach reddit-read <thread url>` |
 | X | `reach x-search "<q>"` · `reach x-user <handle>` |
 | Instagram | `reach ig-search "<q>"` · `reach ig-user <handle>` · `reach ig-comments <post url> -n 30` (best effort) |
 | TikTok | `reach tt-search "<q>"` · `reach tt-user <handle>` (views/likes/comments/shares/saves/caption) |
