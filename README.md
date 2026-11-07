@@ -15,7 +15,7 @@ If any step fails, stop and tell me the error. Run only the commands below.
    ~/.local/bin/uv (or %USERPROFILE%\.local\bin\uv.exe on Windows) until I restart:
    macOS/Linux:  curl -LsSf https://astral.sh/uv/install.sh | sh
    Windows:      powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-2. Run: uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.1
+2. Run: uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.2
    If `reach` isn't found afterwards, use its full path in ~/.local/bin and run `uv tool update-shell`.
 3. Run: reach install-skill
 4. Add this to ~/.claude/CLAUDE.md (create it if missing):
@@ -112,7 +112,7 @@ Everything below is for developers.
 ## Manual install
 
 ```sh
-uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.1   # needs uv: https://docs.astral.sh/uv/
+uv tool install git+https://github.com/Ahmadelmacho/reach@v0.2.2   # needs uv: https://docs.astral.sh/uv/
 reach install-skill        # writes ~/.claude/skills/reach/SKILL.md
 reach browse https://github.com/Ahmadelmacho/reach
 ```
