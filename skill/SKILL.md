@@ -32,7 +32,7 @@ Act on `hint` when a call fails. Add `--max-chars N` before the command to cap l
 ## Pacing (protects the user's accounts)
 - One reach call at a time. Never in parallel, never in a loop over many profiles or pages.
 - Keep it small: about 10 calls per task, `-n` 10 to 20.
-- If reach says pacing, wait the seconds it names, then try once more. If it says cooling down, daily limit, bot check, rate limit, login wall or verify: stop using that site, tell the user, and use other sources. Never reword and retry.
+- If reach says pacing, wait the seconds it names, then try once more. If it says cooling down, daily limit, refused, bot check, rate limit, login wall or verify: stop calling that site through reach, tell the user, and use other sources, or another tool for that site only if the error tells you to. Never reword and retry.
 - Prefer sources that need no login (YouTube, TikTok, GitHub, PubMed, search) when they answer the question.
 
 ## Logging in

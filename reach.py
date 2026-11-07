@@ -89,10 +89,11 @@ PRIVATE_PATH_RE = re.compile(r"^/(?:(?:messages?|direct|inbox|messaging|chat|i/c
 
 
 class ReachError(Exception):
-    def __init__(self, msg: str, hint: str = "", cooldown_min: int = 0):
+    def __init__(self, msg: str, hint: str = "", cooldown_min: int = 0, refused: bool = False):
         super().__init__(msg)
         self.hint = hint
         self.cooldown_min = cooldown_min  # >0: the site pushed back; pause it this long
+        self.refused = refused or cooldown_min > 0  # this site is off limits for now: main() adds the way out
 
 
 # ── pacing: behave like one person reading, and back off when a site pushes back ──
@@ -122,9 +123,16 @@ def _save_state(state: dict) -> None:
     os.replace(tmp, STATE)
 
 
+def _way_out() -> str:
+    # Goes in the error itself, the one text an agent always reads when a call fails. Reddit only: on other sites
+    # "another tool" could mean the user's own logged-in browser, right after that account was told to stop.
+    return " If you have another Reddit tool set up, switch to it now." if _site_in_use == "reddit" else ""
+
+
 def gate(site: str, now: float | None = None) -> None:
     """Fail fast (never sleep) if this site was used too recently, too often today, or is cooling down."""
     global _site_in_use
+    _site_in_use = site
     gap, cap = LIMITS[site]
     now = time.time() if now is None else now
     state = _load_state()
@@ -133,18 +141,19 @@ def gate(site: str, now: float | None = None) -> None:
     if now < s.get("cooldown_until", 0):
         until = time.strftime("%H:%M", time.localtime(s["cooldown_until"]))
         raise ReachError(f"{site} is cooling down until {until} after it pushed back",
-                         hint=f"Do not retry {site} before then. Tell the user; use other sources meanwhile.")
+                         hint=f"Do not retry {site} before then. Tell the user; use other sources meanwhile.",
+                         refused=True)
     wait = s.get("last", 0) + gap * (1 + s.get("jitter", 0)) - now
     if wait > 0:
         raise ReachError(f"pacing: wait {int(wait) + 1}s before the next {site} call",
                          hint="Do other work first, then try once more. Never run reach calls in parallel.")
     count = s.get("count", 0) if s.get("day") == today else 0
     if count >= cap:
-        raise ReachError(f"daily limit reached for {site} ({cap} calls)", hint="Stop using this site until tomorrow.")
+        raise ReachError(f"daily limit reached for {site} ({cap} calls)",
+                         hint=f"Stop calling {site} through reach until tomorrow.", refused=True)
     state[site] = {"last": now, "jitter": round(random.uniform(0, 0.3), 3), "day": today, "count": count + 1,
                    "cooldown_until": s.get("cooldown_until", 0)}
     _save_state(state)
-    _site_in_use = site
 
 
 def pause(site: str, minutes: int, now: float | None = None) -> None:
@@ -280,18 +289,41 @@ def _wait(page, ms: int) -> None:
 CHECKPOINT_RE = re.compile(r"/(challenge|checkpoint|account/access|accounts/suspended|suspended)(/|$)")
 
 
+def _refusal(status) -> ReachError:
+    """Chrome fails a page load that has an HTTP error status and an empty body; Reddit refused a browser this way."""
+    if status in (404, 410):
+        return ReachError(f"that page is gone (HTTP {status} with an empty page)",
+                          hint="Check the link. Nothing was paused.")
+    # shortcut: an outage's empty 5xx pauses the site too, shorten it once we know which status sites refuse with
+    minutes = 30 if _site_in_use == "duckduckgo" else 60
+    hint = "Do not retry."
+    if _site_in_use:
+        hint += f" {_site_in_use} is paused for {minutes} minutes."
+    if _site_in_use in SITES:
+        hint += f" If it still fails after that, the login may have lapsed: offer the user `reach login {_site_in_use}`."
+    return ReachError(f"{_site_in_use or 'the site'} refused this browser (HTTP {status} with an empty page)",
+                      hint=hint + " Tell the user; use other sources meanwhile.", cooldown_min=minutes)
+
+
 def _goto(page, url: str, settle_ms: int = 2500):
-    resp = page.goto(safe_url(url), wait_until="domcontentloaded", timeout=30000)
+    statuses = []  # the failed load's error doesn't say which status it got
+    page.on("response", lambda r: statuses.append(r.status) if r.request.is_navigation_request() else None)
+    try:
+        resp = page.goto(safe_url(url), wait_until="domcontentloaded", timeout=30000)
+    except Exception as exc:  # noqa: BLE001
+        if not str(exc).startswith("Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE"):
+            raise
+        raise _refusal(statuses[-1] if statuses else "unknown") from None
     _wait(page, settle_ms)
     if _site_in_use and CHECKPOINT_RE.search(urlparse(page.url).path):
         raise ReachError(f"{_site_in_use} wants this account to verify itself, or says it is locked",
-                         hint="Stop using this site. Tell the user to open it with that account in their own "
-                              "browser. reach pauses it for 24 hours.", cooldown_min=24 * 60)
+                         hint="Stop calling this site through reach. Tell the user to open it with that account in "
+                              "their own browser. reach pauses it for 24 hours.", cooldown_min=24 * 60)
     return resp
 
 
 # Bot-check / challenge pages. Only trusted on short pages: a real article may mention "captcha".
-BLOCK_RE = re.compile(r"just a moment\.\.\.|performing security verification|verify you are human|"
+BLOCK_RE = re.compile(r"just a moment\.\.\.|performing security verification|verify you are human|prove your humanity|"
                       r"attention required|captcha|access denied|pardon our interruption|are you a robot|"
                       r"(validating|checking) your browser", re.I)
 
@@ -529,10 +561,15 @@ def gh_issue(ref: str, limit: int) -> dict:
 
 def reddit_get(path: str, accept: str = "application/json") -> str:
     with browser_page(SITES["reddit"][1]) as page:
-        _goto(page, "https://www.reddit.com/", settle_ms=500)
-        status, body = page.evaluate(
-            "async ([p, a]) => { const r = await fetch(p, {headers: {accept: a}});"
-            " return [r.status, await r.text()]; }", [path, accept])
+        resp = _goto(page, "https://www.reddit.com/", settle_ms=500)
+        if resp and resp.status >= 400:  # the homepage already said no: don't ask again
+            status, body = resp.status, ""
+        else:
+            status, body = page.evaluate(
+                "async ([p, a]) => { const r = await fetch(p, {headers: {accept: a}});"
+                " return [r.status, await r.text()]; }", [path, accept])
+    if status in (404, 410):
+        raise ReachError(f"that Reddit page is gone (HTTP {status})", hint="Check the link. Nothing was paused.")
     if status == 429:
         raise ReachError("Reddit is rate-limiting", hint="Do not retry. Reddit is paused for 30 minutes.",
                          cooldown_min=30)
@@ -540,11 +577,21 @@ def reddit_get(path: str, accept: str = "application/json") -> str:
         raise ReachError(f"Reddit returned {status}", hint="Do not retry; Reddit is paused for an hour. If "
                          "reddit-read and reddit-sub also fail after that, the login may have lapsed: offer "
                          "the user `reach login reddit`.", cooldown_min=60)
+    # Its reCAPTCHA page answers 200. Only the first title of an HTML page: strangers write the rest of these bodies.
+    title = re.search(r"<title[^>]*>([^<]*)", body) if accept == "text/html" else None
+    if title and "Prove your humanity" in title.group(1):
+        raise ReachError("Reddit showed a bot check", hint="Do not retry. Reddit is paused for 2 hours.",
+                         cooldown_min=120)
     return body
 
 
 def reddit_json(path: str):
-    return json.loads(reddit_get(path))
+    body = reddit_get(path)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:  # a 200 carrying a page instead of data is a refusal too
+        raise ReachError("Reddit answered with a page instead of data",
+                         hint="Do not retry; Reddit is paused for an hour.", cooldown_min=60) from None
 
 
 def _post(d: dict) -> dict:
@@ -1042,7 +1089,7 @@ Act on `hint` when a call fails. Add `--max-chars N` before the command to cap l
 ## Pacing (protects the user's accounts)
 - One reach call at a time. Never in parallel, never in a loop over many profiles or pages.
 - Keep it small: about 10 calls per task, `-n` 10 to 20.
-- If reach says pacing, wait the seconds it names, then try once more. If it says cooling down, daily limit, bot check, rate limit, login wall or verify: stop using that site, tell the user, and use other sources. Never reword and retry.
+- If reach says pacing, wait the seconds it names, then try once more. If it says cooling down, daily limit, refused, bot check, rate limit, login wall or verify: stop calling that site through reach, tell the user, and use other sources, or another tool for that site only if the error tells you to. Never reword and retry.
 - Prefer sources that need no login (YouTube, TikTok, GitHub, PubMed, search) when they answer the question.
 
 ## Logging in
@@ -1150,7 +1197,8 @@ def main(argv: list | None = None) -> int:
         def _timeout():
             if printed.acquire(blocking=False):
                 _emit({"ok": False, "command": a.cmd, "untrusted_content": True,
-                       "error": f"timed out after {LONG_RUN_S}s", "hint": "The site is slow or stuck. Do not retry now."})
+                       "error": f"timed out after {LONG_RUN_S}s",
+                       "hint": "The site is slow or stuck. Do not retry now." + _way_out()})
                 # ponytail: hard exit can leave a Chrome child behind; Playwright's own 30 s timeouts make this rare
                 os._exit(1)
         timer = threading.Timer(LONG_RUN_S, _timeout)
@@ -1193,10 +1241,12 @@ def main(argv: list | None = None) -> int:
                 pause(_site_in_use, exc.cooldown_min)
             except OSError:
                 pass  # the original error matters more than recording the pause
-        out, code = {"ok": False, "command": a.cmd, "untrusted_content": True, "error": str(exc), "hint": exc.hint}, 1
+        out, code = {"ok": False, "command": a.cmd, "untrusted_content": True, "error": str(exc),
+                     "hint": exc.hint + (_way_out() if exc.refused else "")}, 1
     except Exception as exc:  # noqa: BLE001
         out, code = {"ok": False, "command": a.cmd, "untrusted_content": True,
-                     "error": ANSI_RE.sub("", f"{type(exc).__name__}: {exc}")[:500]}, 1
+                     "error": ANSI_RE.sub("", f"{type(exc).__name__}: {exc}")[:500],
+                     "hint": "Unexpected failure. Do not repeat this call now." + _way_out()}, 1
     if printed.acquire(blocking=False):
         _emit(out)
     return code

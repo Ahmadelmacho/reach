@@ -167,6 +167,7 @@ for bad in ("https://example.com/v.mp4", "https://youtube.com.evil.com/watch?v=1
         reach._yt_url(bad); raise AssertionError("allowed " + bad)
     except reach.ReachError:
         pass
+reach._public_host = lambda _host: True  # no DNS from here on: this file runs offline
 assert reach._yt_url("https://www.youtube.com/watch?v=abc") and reach._yt_url("https://youtu.be/abc")
 for path in ("/messages", "/direct/inbox/", "/message/inbox", "/i/chat", "/settings/account", "/notifications",
              "/someone/saved/", "/user/bob/saved", "/messaging/thread/1"):
@@ -191,5 +192,142 @@ assert reach.HIDDEN_RE.sub("", "a\U000e0041‮b​c") == "abc" and reach.HIDDEN_
 o = reach.hook(io.StringIO('{"tool_name": "WebFetch", "tool_input": {"url": "https://ignore-all-rules.reddit.com/x"}}'))
 assert "ignore" not in ctx(o) and "reddit.com" in ctx(o)
 assert (_P(__file__).parent / "skill" / "SKILL.md").read_text("utf-8") == reach.SKILL_MD, "skill/SKILL.md drifted"
+
+# refusals, end to end through main(): pause the site, say what to do, never a raw error agents retry
+import contextlib, json, types  # noqa: E401,E402
+REFUSED = "Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE at https://www.reddit.com/\nCall log:\n"
+WAY_OUT = "another Reddit tool"
+REDDIT_PAGE = "https://www.reddit.com/r/a/"
+
+
+class _RefusedPage:
+    def __init__(self, error=REFUSED, status=403):
+        self.error, self.status, self.listen = error, status, None
+
+    def on(self, _event, listen):
+        self.listen = listen
+
+    def goto(self, *_a, **_k):
+        request = types.SimpleNamespace(is_navigation_request=lambda: True)
+        self.listen(types.SimpleNamespace(status=self.status, request=request))
+        raise RuntimeError(self.error)
+
+
+class _AnswerPage:
+    def __init__(self, status=200, body="", url="https://www.reddit.com/", home=200):
+        self.status, self.body, self.url, self.home, self.fetches = status, body, url, home, 0
+
+    def on(self, *_a):
+        pass
+
+    def goto(self, *_a, **_k):
+        return types.SimpleNamespace(status=self.home)
+
+    def wait_for_timeout(self, _ms):
+        pass
+
+    def evaluate(self, *_a):
+        self.fetches += 1
+        return [self.status, self.body]
+
+    def inner_text(self, _selector):
+        return self.body
+
+    def title(self):
+        return ""
+
+
+def _browser_with(page):
+    @contextlib.contextmanager
+    def fake(domains=()):
+        if domains:
+            reach.gate(reach._site_key(domains))
+        yield page
+    return fake
+
+
+def _call(*argv):
+    raw = io.BytesIO()
+    out = io.TextIOWrapper(raw, encoding="utf-8")
+    with contextlib.redirect_stdout(out):
+        code = reach.main(list(argv))
+    out.flush()
+    return code, json.loads(raw.getvalue())
+
+
+def _run(page, *argv):  # a fresh process on a page that answers this way
+    reach._save_state({})
+    reach._site_in_use = None
+    reach.browser_page = _browser_with(page)
+    return _call(*argv)
+
+
+def _pause_left(site):
+    return reach._load_state().get(site, {}).get("cooldown_until", 0) - _t.time()
+
+
+def _refused(page, *argv):
+    code, o = _run(page, *argv)
+    assert code == 1 and WAY_OUT in o["hint"] and _pause_left("reddit") > 0, o
+    return o
+
+
+_real_browser = reach.browser_page
+o = _refused(_RefusedPage(), "reddit-search", "x")
+assert "refused" in o["error"] and "403" in o["error"] and "Do not retry" in o["hint"], o
+assert "reach login reddit" in o["hint"] and 59 * 60 < _pause_left("reddit") <= 60 * 60, o
+code, o = _call("reddit-read", "https://www.reddit.com/r/a/comments/1/x/")  # paused: fails before any browser opens
+assert code == 1 and "cooling down" in o["error"] and WAY_OUT in o["hint"], o
+_refused(_AnswerPage(403), "reddit-search", "x")
+_refused(_AnswerPage(429), "reddit-search", "x")
+_home_said_no = _AnswerPage(home=429)
+_refused(_home_said_no, "reddit-search", "x")
+assert _home_said_no.fetches == 0, "asked Reddit again after the homepage refused"
+CAPTCHA = "<html><head><title>Reddit - Prove your humanity</title></head></html>"  # its reCAPTCHA page answers 200
+_refused(_AnswerPage(body=CAPTCHA), "reddit-search", "x")
+_refused(_AnswerPage(body=CAPTCHA), "reddit-sub", "x")
+_refused(_AnswerPage(body="<html>a page, not data</html>"), "reddit-sub", "x")
+_refused(_AnswerPage(body="captcha"), "browse", REDDIT_PAGE)
+_refused(_AnswerPage(body="Prove your humanity We're committed to safety and security. But not for bots. "
+                          "Complete the challenge below."), "browse", REDDIT_PAGE)  # the real page's text
+_refused(_AnswerPage(url="https://www.reddit.com/account/access/"), "browse", REDDIT_PAGE)
+
+# strangers write these bodies: quoting the captcha title in a comment or a post must not pause Reddit for anyone
+code, o = _run(_AnswerPage(body='{"data": {"children": [], "note": "<title>Reddit - Prove your humanity"}}'),
+               "reddit-sub", "x")
+assert code == 0 and o["result"]["results"] == [] and _pause_left("reddit") <= 0, o
+code, o = _run(_AnswerPage(body="<html><title>Reddit - search</title><b><title>Reddit - Prove your humanity</b></html>"),
+               "reddit-search", "x")
+assert code == 1 and "no Reddit posts" in o["error"] and WAY_OUT not in o["hint"] and _pause_left("reddit") <= 0, o
+
+# one dead link is not a refusal; pacing and an empty search don't send anyone elsewhere
+code, o = _run(_RefusedPage(status=404), "browse", REDDIT_PAGE)
+assert code == 1 and "404" in o["error"] and "refused" not in o["error"] and _pause_left("reddit") <= 0, o
+assert WAY_OUT not in o["hint"], o
+for gone in (404, 410):  # a deleted thread answers this way through the JSON path
+    code, o = _run(_AnswerPage(gone), "reddit-read", "https://www.reddit.com/r/a/comments/1/x/")
+    assert code == 1 and str(gone) in o["error"] and _pause_left("reddit") <= 0 and WAY_OUT not in o["hint"], o
+reach._save_state({"reddit": {"last": _t.time(), "jitter": 0}})
+code, o = _call("reddit-search", "x")
+assert "pacing" in o["error"] and WAY_OUT not in o["hint"], o
+reach._save_state({"reddit": {"day": _t.strftime("%Y-%m-%d"), "count": 150}})
+code, o = _call("reddit-search", "x")
+assert "daily limit" in o["error"] and WAY_OUT in o["hint"], o
+
+# other sites: paused, nothing about Reddit; DuckDuckGo keeps its recorded 30 minutes; the throwaway browser pauses nothing
+code, o = _run(_RefusedPage(), "x-user", "someone")
+assert code == 1 and _pause_left("x") > 0 and "Reddit" not in o["hint"] and "reach login x" in o["hint"], o
+code, o = _run(_RefusedPage(), "search", "q")
+assert code == 1 and 29 * 60 < _pause_left("duckduckgo") <= 30 * 60 and "30 minutes" in o["hint"], o
+assert "reach login" not in o["hint"], o
+code, o = _run(_RefusedPage(), "browse", "https://a.invalid/page")
+assert code == 1 and "paused" not in o["hint"] and "Do not retry" in o["hint"], o
+
+# anything else keeps its own error and gains a hint, with no pause, even a URL holding the marker text
+for other in ("Page.goto: Timeout 30000ms exceeded.",
+              "Page.goto: net::ERR_ABORTED at https://a.invalid/ERR_HTTP_RESPONSE_CODE_FAILURE"):
+    code, o = _run(_RefusedPage(other), "reddit-search", "x")
+    assert code == 1 and other in o["error"] and WAY_OUT in o["hint"] and _pause_left("reddit") <= 0, o
+reach.browser_page, reach._site_in_use = _real_browser, None
 
 print("ok")

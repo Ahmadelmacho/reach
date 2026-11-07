@@ -96,7 +96,7 @@ Prefer not to touch a terminal? Ask Claude: **"Log reach into Reddit"**. It open
 
 1. One reach call at a time. Never in parallel or in a loop.
 2. Keep it small: about 10 calls per task.
-3. If reach says cooling down, daily limit, bot check, rate limit, login wall or verify: stop using that site. Never reword and retry.
+3. If reach says cooling down, daily limit, refused, bot check, rate limit, login wall or verify: stop calling that site through reach. Never reword and retry.
 4. Use logged-in sites only when logged-out sources won't do.
 5. Don't pass private, signed, token or share links. Ordinary pages go through Jina Reader, a third party.
 6. Analyse what people say in aggregate. Don't build lists of usernames, contact commenters, or link people across sites. Quote a line or two with credit; don't republish long posts or transcripts.
@@ -189,6 +189,7 @@ Found a security problem? Report it privately from the repo's **Security** tab (
 - **"pacing: wait Ns"**: normal. Wait that long, then try once.
 - **"cooling down" / "daily limit"**: the site pushed back or you hit the day's cap. Use other sources until then.
 - **"bot check"**: the site showed a captcha. Open the page in your own browser.
+- **"refused this browser"** or **"answered with a page instead of data"**: the site turned reach's browser away, and reach pauses it for an hour (DuckDuckGo: 30 minutes). If it still fails after that, run `reach login <site>`. Reddit errors also tell an agent to switch to another Reddit tool, if you set one up.
 - **"needs a login"**: run `reach login <site>` and sign in.
 - **"could not start the reach browser"**: another reach call or a `reach login` window is using the profile, or Chrome isn't installed (set `REACH_CHROME`).
 - **YouTube "refused the captions"**: YouTube rate-limits caption downloads. Try again later.
