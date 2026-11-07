@@ -616,7 +616,9 @@ def flatten_comments(children: list, depth: int = 0, out: list | None = None) ->
 def parse_reddit_search(page_html: str, n: int) -> list:
     """Posts from Reddit's search page: title, subreddit, author, date and counts, no body text."""
     out = []
-    for unit in page_html.split('data-testid="search-post-unit"')[1:]:
+    # The marker must sit in a tag: quoted attributes can hold ">" (Reddit's classes do), and "<" is escaped in text.
+    # {0,300} keeps malformed pages fast: a regex can't be interrupted, and uncapped its time grows with size squared.
+    for unit in re.split(r'<[a-z][\w-]*\b(?:[^>"]|"[^"]*"){0,300}?\bdata-testid="search-post-[a-z-]+"', page_html)[1:]:
         ctx = re.search(r'data-faceplate-tracking-context="([^"]*)"', unit)
         tag = re.search(r'<a\b[^>]*data-testid="post-title"[^>]*>', unit)
         href = re.search(r'\bhref="(/r/[^"/]+/comments/[^"]+)"', tag.group(0)) if tag else None
@@ -645,7 +647,12 @@ def parse_reddit_search(page_html: str, n: int) -> list:
 def reddit_search(query: str, n: int, sub: str = "") -> dict:
     # Reddit's search.json answers 403 since late Oct 2026; its search page still works (first page only).
     base = f"/r/{quote(sub, safe='')}/search/?restrict_sr=1&" if sub else "/search/?"
-    results = parse_reddit_search(reddit_get(f"{base}q={quote(query)}", accept="text/html"), n)
+    page_html = reddit_get(f"{base}q={quote(query)}", accept="text/html")
+    results = parse_reddit_search(page_html, n)
+    if not results and 'data-testid="post-title"' in page_html:
+        raise ReachError("Reddit changed its search page and reach can't read it", refused=True,
+                         hint="Do not retry this search. Tell the user reach needs an update. "
+                              "Use reddit-sub or `reach search` meanwhile.")
     if not results:
         raise ReachError("no Reddit posts found", hint="Nothing matched, or Reddit changed its search page. Try "
                          "other words once, then use reddit-sub or `reach search` instead.")

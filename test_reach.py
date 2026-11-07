@@ -64,6 +64,33 @@ rs = reach.parse_reddit_search(unit + broken + unit, 5)
 assert rs[0] == {"title": 'Tips & "tricks"', "subreddit": "sub", "author": "u1", "score": -2, "comments": 11,
                  "created_utc": 1792474180, "url": "https://www.reddit.com/r/sub/comments/abc/tips_tricks/"}, rs
 assert len(rs) == 2 and len(reach.parse_reddit_search(unit * 3, 1)) == 1 and reach.parse_reddit_search("<html>", 5) == []
+# Since Nov 2026 site-wide search wraps a post with a text preview in a newer element, and keeps the older one for other
+# posts on the same page. The link comes before "sdui-post-unit", so splitting there would give a post the next one's link.
+def _preview_unit(post, votes, text="t", wrapper='div data-testid="search-post-with-content-preview"'):
+    return (f'<{wrapper}><search-telemetry-tracker data-faceplate-tracking-context="{{&quot;post&quot;:{{&quot;title&quot;:'
+            f'&quot;{post}&quot;}},&quot;profile&quot;:{{&quot;name&quot;:&quot;u1&quot;}},&quot;subreddit&quot;:{{&quot;name&quot;:&quot;sub&quot;}}}}">'
+            f'<h2><a data-testid="post-title" href="/r/sub/comments/{post}/x/" aria-label="{post}"></a></h2></search-telemetry-tracker>'
+            f'<div data-testid="sdui-post-unit"><faceplate-timeago ts="2026-10-20T05:29:40.423000+0000"></faceplate-timeago>'
+            f'<a data-testid="post-title-text" href="/r/sub/comments/{post}/x/">{text}</a><div data-testid="search-counter-row">'
+            f'<span><faceplate-number number="{votes}" pretty></faceplate-number> votes</span>'
+            f'<span><faceplate-number number="4" pretty></faceplate-number> comments</span></div></div></div>')
+rs = reach.parse_reddit_search(_preview_unit("p1", 1) + unit + _preview_unit("p2", 2), 5)
+assert rs[0] == {"title": "p1", "subreddit": "sub", "author": "u1", "score": 1, "comments": 4,
+                 "created_utc": 1792474180, "url": "https://www.reddit.com/r/sub/comments/p1/x/"}, rs
+assert [(r["title"], r["score"]) for r in rs[1:]] == [('Tips & "tricks"', -2), ("p2", 2)], rs
+# The wrapper can be renamed, move to another element, or carry a ">" in a quoted class (Reddit's classes already do)
+for wrapper in ('div data-testid="search-post-with-media-preview"', 'article data-testid="search-post-unit"',
+                'div class="[&>svg]:w-4" data-testid="search-post-unit"'):
+    rs = reach.parse_reddit_search(_preview_unit("p4", 4, wrapper=wrapper), 5)
+    assert [(r["title"], r["score"]) for r in rs] == [("p4", 4)], (wrapper, rs)
+# Post text can hold the marker words. "<" is escaped in text, so they can't open a tag and split the post from its counts.
+rs = reach.parse_reddit_search(_preview_unit("p3", 3, text='data-testid="search-post-unit"'), 5)
+assert [(r["title"], r["score"]) for r in rs] == [("p3", 3)], rs
+# A malformed page can't hang the parser: uncapped, this input takes about 2 seconds
+import time  # noqa: E402
+_started = time.perf_counter()
+assert reach.parse_reddit_search("<div " * 6000, 5) == []
+assert time.perf_counter() - _started < 1, "search parser is slow on malformed markup"
 
 # Instagram: post objects found at any depth, deduped by shortcode
 payload = {"data": {"x": {"edges": [{"node": {"code": "AB1", "taken_at": 1, "user": {"username": "u"},
@@ -299,6 +326,10 @@ assert code == 0 and o["result"]["results"] == [] and _pause_left("reddit") <= 0
 code, o = _run(_AnswerPage(body="<html><title>Reddit - search</title><b><title>Reddit - Prove your humanity</b></html>"),
                "reddit-search", "x")
 assert code == 1 and "no Reddit posts" in o["error"] and WAY_OUT not in o["hint"] and _pause_left("reddit") <= 0, o
+# posts on the page that the parser can't read: other words can't help, so say so. Nothing refused us, so no pause.
+code, o = _run(_AnswerPage(body='<a data-testid="post-title" href="/r/a/comments/1/x/"></a>'), "reddit-search", "x")
+assert code == 1 and "changed" in o["error"] and "other words" not in o["hint"], o
+assert WAY_OUT in o["hint"] and _pause_left("reddit") <= 0, o
 
 # one dead link is not a refusal; pacing and an empty search don't send anyone elsewhere
 code, o = _run(_RefusedPage(status=404), "browse", REDDIT_PAGE)
